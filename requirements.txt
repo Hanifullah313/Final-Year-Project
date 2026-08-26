@@ -1,0 +1,24 @@
+# PyTorch with CUDA 12.1 (Install using: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121)
+torch>=2.2.0
+torchvision>=0.17.0
+torchaudio>=2.2.0
+
+# LLM & Fine-Tuning / Grounding
+transformers>=4.38.0
+peft>=0.9.0
+bitsandbytes>=0.42.0
+accelerate>=0.28.0
+safetensors>=0.4.2
+
+# Medical Segmentation & Image Processing
+segmentation-models-pytorch>=0.3.3
+opencv-python>=4.9.0
+pillow>=10.2.0
+numpy>=1.26.0
+
+# API & Web App Frontend
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+python-multipart>=0.0.9
+streamlit>=1.32.0
+requests>=2.31.0
