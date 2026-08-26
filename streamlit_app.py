@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import base64
+import json
 import io
 import datetime
 from PIL import Image
@@ -10,9 +11,8 @@ from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage, HRFlowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
-from database import init_db, save_record, get_all_records, get_record_by_id
+from database import init_db, save_record, get_all_records
 
-# Initialize SQLite tables on startup
 init_db()
 
 st.set_page_config(
@@ -21,7 +21,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- PDF Builder ---
+# --- PDF Generation Function ---
 def create_clinical_pdf(patient_data, report_text, orig_img_bytes, overlay_img_bytes, region_desc):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
@@ -148,8 +148,11 @@ with tab_diag:
                         res_data = response.json()
                         st.session_state["result"] = res_data
                         st.session_state["orig_bytes"] = orig_bytes
+                        st.session_state["chat_history"] = [
+                            {"role": "user", "content": f"Analyze this chest radiograph with focus on localized thoracic {res_data['region_description']}."},
+                            {"role": "assistant", "content": res_data["generated_report"]}
+                        ]
 
-                        # Auto-save record to SQLite Database
                         orig_b64 = base64.b64encode(orig_bytes).decode('utf-8')
                         record_id = save_record(
                             patient_id=p_id,
@@ -161,11 +164,11 @@ with tab_diag:
                             orig_b64=orig_b64,
                             overlay_b64=res_data["heatmap_overlay_base64"]
                         )
-                        st.toast(f"Record successfully archived in database (Record #{record_id})", icon="💾")
+                        st.toast(f"Archived in database (Record #{record_id})", icon="💾")
                     else:
-                        st.error(f"Backend Server Error ({response.status_code}): {response.text}")
+                        st.error(f"Backend Error ({response.status_code}): {response.text}")
                 except Exception as e:
-                    st.error(f"Failed to connect to backend: {e}")
+                    st.error(f"Failed to connect: {e}")
 
     if "result" in st.session_state:
         res = st.session_state["result"]
@@ -196,6 +199,52 @@ with tab_diag:
             mime="application/pdf",
             type="primary"
         )
+
+        # ----------------- Interactive Multi-turn VLM Chatbot -----------------
+        st.markdown("---")
+        st.subheader("💬 Interactive Radiologist Copilot (Follow-up Inquiries)")
+        st.caption("Ask specific clinical follow-up questions about this radiograph.")
+
+        # Suggested Quick Prompts
+        quick_cols = st.columns(3)
+        sample_q = None
+        if quick_cols[0].button("🔍 Are costophrenic angles clear?"):
+            sample_q = "Are the costophrenic angles clear or blunted?"
+        if quick_cols[1].button("❤️ Is cardiomegaly present?"):
+            sample_q = "Is the cardiac silhouette enlarged or normal?"
+        if quick_cols[2].button("📋 What are the differential diagnoses?"):
+            sample_q = "What are the possible differential diagnoses for the findings on this radiograph?"
+
+        # Display Chat Messages
+        if "chat_history" in st.session_state:
+            for msg in st.session_state["chat_history"][2:]:  # skip the initial system prompt pair
+                with st.chat_message(msg["role"]):
+                    st.write(msg["content"])
+
+        # Chat Input Bar
+        user_input = st.chat_input("Ask a clinical question about this scan...")
+        query_to_send = sample_q or user_input
+
+        if query_to_send and "orig_bytes" in st.session_state:
+            st.session_state["chat_history"].append({"role": "user", "content": query_to_send})
+            with st.chat_message("user"):
+                st.write(query_to_send)
+
+            with st.chat_message("assistant"):
+                with st.spinner("AI Radiologist reviewing radiograph..."):
+                    try:
+                        files = {"file": ("radiograph.png", st.session_state["orig_bytes"], "image/png")}
+                        data = {"chat_history": json.dumps(st.session_state["chat_history"])}
+                        chat_res = requests.post(f"{API_ENDPOINT.rstrip('/')}/chat", files=files, data=data, timeout=90)
+                        
+                        if chat_res.status_code == 200:
+                            reply = chat_res.json().get("reply", "No response generated.")
+                            st.write(reply)
+                            st.session_state["chat_history"].append({"role": "assistant", "content": reply})
+                        else:
+                            st.error(f"Chat API Error: {chat_res.text}")
+                    except Exception as e:
+                        st.error(f"Chat error: {e}")
 
 # ==================== TAB 2: DATABASE HISTORY ====================
 with tab_history:
